@@ -26,7 +26,7 @@ async def cmd_start(message: Message, state: FSMContext):
         user_data = registered_users.get(user_id, {})
         user_name = user_data.get("name", "гость")
         await message.answer(f"С возвращением, {user_name}!")
-        await message.answer(main_page(), reply_markup=kb.main)
+        await message.answer(main_page(), reply_markup=kb.main) 
         
 def main_page():
     return("Что сделаем?")

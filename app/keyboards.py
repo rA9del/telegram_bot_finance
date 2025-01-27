@@ -18,6 +18,51 @@ catalog = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Кепки', callback_data='cap')]])
 
 
-get_goal = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='Накопить')],
-                                         [KeyboardButton(text='Отслеживать финансы')]],
-                               resize_keyboard=True)
+get_goal = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Накопить", callback_data="Накопить")],
+        [InlineKeyboardButton(text="Отслеживать финансы", callback_data="Отслеживать финансы")],
+    ]
+)
+
+
+date_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Сегодня", callback_data="today")],
+        [InlineKeyboardButton(text="Другая дата", callback_data="other_date")]
+    ]
+)
+
+expense_categories = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Продукты", callback_data="Продукты")],
+        [InlineKeyboardButton(text="Транспорт", callback_data="Транспорт")],
+        [InlineKeyboardButton(text="Развлечения", callback_data="Развлечения")]
+    ]
+)
+
+currency_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="USD ($)", callback_data="USD")],
+        [InlineKeyboardButton(text="EUR (€)", callback_data="EUR")],
+        [InlineKeyboardButton(text="KZT", callback_data="KZT")]
+    ]
+)
+
+
+
+user_dates = ["Сегодня"]
+user_categories = ["Продукты", "Транспорт", "Развлечения"]
+user_currencies = ['KZT', "USD", "EUR"]
+
+date_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Сегодня", callback_data="date_today")],
+        [InlineKeyboardButton(text="Другая дата", callback_data="date_add")]
+    ]
+)
+
+def generate_inline_keyboard(items_list, add_button_text, callback_prefix):
+    buttons = [[InlineKeyboardButton(text=item, callback_data=f"{callback_prefix}_{item}")] for item in items_list]
+    buttons.append([InlineKeyboardButton(text=add_button_text, callback_data=f"{callback_prefix}_add")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -84,6 +84,9 @@ def store_user_data(user_id, data):
     
     
     
+    
+    
+    
 class Expense(StatesGroup):
     date = State()
     category = State()
@@ -187,6 +190,105 @@ async def process_expense_amount(message: Message, state: FSMContext):
             f"📂 Категория: {data['category']}\n"
             f"💰 Валюта: {data['currency']}\n"
             f"💸 Сумма: {data['amount']}"
+        )
+        await message.answer(main_page(), reply_markup=kb.main)
+        await state.clear()
+
+    except ValueError:
+        await message.answer("Введите корректную сумму (например, 150.75).")
+        
+        
+        
+        
+        
+        
+        
+        
+class Profit(StatesGroup):
+    date = State()
+    category = State()
+    currency = State()
+    amount = State()
+    custom_input = State()
+
+@router.callback_query(F.data == "profit")
+async def start_profit_tracking(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Сегодня?", reply_markup=kb.date_keyboard_expense)
+    await state.set_state(Profit.date)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("profit_date_"))
+async def process_profit_date(callback: CallbackQuery, state: FSMContext):
+    date_value = callback.data.split("_")[2]
+
+    if date_value == "today":
+        today = datetime.today().strftime("%Y-%m-%d")
+        await state.update_data(date=today)
+        await process_profit_category_step(callback.message, state)
+    elif date_value == "add":
+        await callback.message.edit_text("А когда тогда? (например, 2024-01-31):")
+        await state.set_state(Profit.custom_input)
+        await state.update_data(field="date")
+    await callback.answer()
+
+
+async def process_profit_category_step(message: Message, state: FSMContext):
+    await message.answer(
+        "Выберите категорию дохода",
+        reply_markup=kb.generate_inline_keyboard(kb.user_profit_source, "Добавить категорию", "profit_category")
+    )
+    await state.set_state(Profit.category)
+
+
+@router.callback_query(F.data.startswith("profit_category_"))
+async def process_profit_category(callback: CallbackQuery, state: FSMContext):
+    category_value = callback.data.split("_")[2]
+
+    if category_value == "add":
+        await callback.message.edit_text("Введите новую категорию дохода:")
+        await state.set_state(Profit.custom_input)
+        await state.update_data(field="category")
+    else:
+        await state.update_data(category=category_value)
+        await callback.message.edit_text(
+            "В какой валюте?",
+            reply_markup=kb.generate_inline_keyboard(kb.user_currencies, "Добавить валюту", "profit_currency")
+        )
+        await state.set_state(Profit.currency)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("profit_currency_"))
+async def process_profit_currency(callback: CallbackQuery, state: FSMContext):
+    currency_value = callback.data.split("_")[2]
+
+    if currency_value == "add":
+        await callback.message.edit_text("Название валюты пж")
+        await state.set_state(Profit.custom_input)
+        await state.update_data(field="currency")
+    else:
+        await state.update_data(currency=currency_value)
+        await callback.message.edit_text("Какую получил этот сигма?")
+        await state.set_state(Profit.amount)
+    await callback.answer()
+
+
+@router.message(Profit.amount)
+async def process_profit_amount(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text)
+        await state.update_data(amount=amount)
+        data = await state.get_data()
+
+        displayed_date = "Сегодня" if data['date'] == datetime.today().strftime("%Y-%m-%d") else data['date']
+
+        await message.answer(
+            f"✅ Доход записан:\n"
+            f"📅 Дата: {displayed_date}\n"
+            f"📂 Категория: {data['category']}\n"
+            f"💰 Валюта: {data['currency']}\n"
+            f"💵 Сумма: {data['amount']}"
         )
         await message.answer(main_page(), reply_markup=kb.main)
         await state.clear()

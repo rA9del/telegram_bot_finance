@@ -71,6 +71,17 @@ date_keyboard_expense = InlineKeyboardMarkup(
     ]
 )
 
+
+report_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="За неделю", callback_data="report_week")],
+        [InlineKeyboardButton(text="За месяц", callback_data="report_month")],
+        [InlineKeyboardButton(text="За год", callback_data="report_year")],
+        [InlineKeyboardButton(text="Пользовательский диапазон", callback_data="report_custom")]
+    ]
+)
+
+
 def generate_inline_keyboard(items_list, add_button_text, callback_prefix):
     buttons = [[InlineKeyboardButton(text=item, callback_data=f"{callback_prefix}_{item}")] for item in items_list]
     buttons.append([InlineKeyboardButton(text=add_button_text, callback_data=f"{callback_prefix}_add")])

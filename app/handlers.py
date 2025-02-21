@@ -1,35 +1,38 @@
 from aiogram import F, Router
-from aiogram.types import Message, CallbackQuery,  ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
+from app.db import  get_db
+from func.states import *
 import app.keyboards as kb
 
-router = Router()
 
-class Register(StatesGroup):
-    name = State()
-    age = State()
-    goal = State()
+
+router = Router()
     
 registered_users = {} ###todo: connect a DB
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    if user_id not in registered_users:
-        await message.answer("Добро пожаловать!")
-        await start_registration(message, state)
-    else:
-        user_data = registered_users.get(user_id, {})
-        user_name = user_data.get("name", "гость")
-        await message.answer(f"С возвращением, {user_name}!")
-        await message.answer(main_page(), reply_markup=kb.main) 
-        
+async def cmd_start(message: Message, state: FSMContext, db: AsyncSession = None):
+    """Handle the /start command."""
+    async with get_db() as db:
+        user = await db.execute(select(User).where(User.user_id == message.from_user.id))
+        user = user.scalars().first()
+
+        if not user:
+            await message.answer("Добро пожаловать!")
+            await start_registration(message, state)
+        else:
+            await message.answer(f"С возвращением, {user.name}!")
+            await message.answer(main_page(), reply_markup=kb.main)
+
 def main_page():
     return("Что сделаем?")
 
@@ -40,15 +43,6 @@ async def start_registration(message: Message, state: FSMContext):
 @router.message(Command('help'))
 async def cmd_help(message: Message):
     await message.answer('Вы нажали на кнопку помощи') ###todo: how to use your bot
-
-@router.message(F.text == 'Каталог')
-async def catalog(message: Message):
-    await message.answer('Выберите категорию товара', reply_markup=kb.catalog)
-
-@router.callback_query(F.data == 't-shirt')
-async def t_shirt(callback: CallbackQuery):
-    await callback.answer('Вы выбрали категорию', show_alert=True)
-    await callback.message.answer('Вы выбрали категорию футболок.')
 
 @router.message(Register.name)
 async def register_name(message: Message, state: FSMContext):
@@ -62,20 +56,28 @@ async def register_age(message: Message, state: FSMContext):
     await state.set_state(Register.goal)
     await message.answer('Что привело сюда?', reply_markup=kb.get_goal)
 
+
 @router.callback_query(F.data.in_(['Накопить', 'Отслеживать финансы']))
-async def register_goal(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(goal=callback.data)
-    data = await state.get_data()
-    
-    user_id = callback.from_user.id
-    store_user_data(user_id, data) 
-    
-    await callback.message.answer(
-        f"Вы {data['name']}, возраст {data['age']}, что хочет {data['goal']}?\nИщи себя в прошма... Рад знакомству)"
-    )
-    await callback.message.answer(main_page(), reply_markup=kb.main)
-    await state.clear()
-    await callback.answer()
+async def register_goal(callback: CallbackQuery, state: FSMContext, db: AsyncSession = None):
+    """Save the user's goal and complete registration."""
+    async with get_db() as db:
+        await state.update_data(goal=callback.data)
+        data = await state.get_data()
+
+        new_user = User(
+            user_id=callback.from_user.id,
+            name=data['name'],
+            age=int(data['age']),
+            goal=data['goal']
+        )
+        db.add(new_user)
+        await db.commit()
+
+        await callback.message.answer(
+            f"Вы {data['name']}, возраст {data['age']}, что хочет {data['goal']}? Рад знакомству!"
+        )
+        await callback.message.answer(main_page(), reply_markup=kb.main)
+        await state.clear()
 
 def store_user_data(user_id, data):
     registered_users[user_id] = data
@@ -295,3 +297,208 @@ async def process_profit_amount(message: Message, state: FSMContext):
 
     except ValueError:
         await message.answer("Введите корректную сумму (например, 150.75).")
+
+
+
+
+
+
+
+
+class Report(StatesGroup):
+    range = State()
+    start_date = State()
+    end_date = State()
+
+@router.callback_query(F.data == "report")
+async def start_report(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Выберите временной диапазон:", reply_markup=kb.report_keyboard)
+    await state.set_state(Report.range)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("report_"))
+async def generate_report(callback: CallbackQuery, state: FSMContext):
+    report_type = callback.data.split("_")[1]
+    today = datetime.today()
+    
+    if report_type == "week":
+        start_date = today - timedelta(days=7)
+    elif report_type == "month":
+        start_date = today - timedelta(days=30)
+    elif report_type == "year":
+        start_date = today - timedelta(days=365)
+    elif report_type == "custom":
+        await callback.message.edit_text("Введите начальную дату (например, 2024-01-01):")
+        await state.set_state(Report.start_date)
+        await callback.answer()
+        return
+    
+    end_date = today
+    await display_report(callback.message, start_date, end_date)
+    await state.clear()
+    await callback.answer()
+
+@router.message(Report.start_date)
+async def get_start_date(message: Message, state: FSMContext):
+    try:
+        start_date = datetime.strptime(message.text, "%Y-%m-%d").date()
+        await state.update_data(start_date=start_date)
+        await message.answer("Введите конечную дату (например, 2024-12-31):")
+        await state.set_state(Report.end_date)
+    except ValueError:
+        await message.answer("Неверный формат даты. Попробуйте еще раз (ГГГГ-ММ-ДД).")
+
+
+@router.message(Report.end_date)
+async def get_end_date(message: Message, state: FSMContext):
+    try:
+        end_date = datetime.strptime(message.text, "%Y-%m-%d").date()
+        data = await state.get_data()
+        start_date = data.get("start_date")
+
+        if not start_date or end_date < start_date:
+            raise ValueError("Конечная дата должна быть позже начальной.")
+        await display_report(message, start_date, end_date)
+        await state.clear()
+    except ValueError:
+        await message.answer("Неверный формат даты или конечная дата раньше начальной. Попробуйте снова.")
+
+
+
+
+async def display_report(message: Message, start_date: datetime.date, end_date: datetime.date):
+    # Sample data for demonstration
+    sample_data = {
+        "losses": [{"date": "2024-01-25", "amount": 100, "currency": "USD", "category": "Транспорт"}],
+        "profits": [{"date": "2024-01-27", "amount": 200, "currency": "USD", "category": "Работа"}]
+    }
+    
+    start_datetime = datetime.combine(start_date, datetime.min.time())
+    end_datetime = datetime.combine(end_date, datetime.max.time())
+
+    total_losses = sum(
+        item["amount"] for item in sample_data["losses"]
+        if start_datetime <= datetime.strptime(item["date"], "%Y-%m-%d") <= end_datetime
+    )
+    total_profits = sum(
+        item["amount"] for item in sample_data["profits"]
+        if start_datetime <= datetime.strptime(item["date"], "%Y-%m-%d") <= end_datetime
+    )
+
+    # Send the report to the user
+    await message.answer(
+        f"📅 Отчет с {start_date} по {end_date}:\n"
+        f"💸 Траты: {total_losses} USD\n"
+        f"💵 Доходы: {total_profits} USD\n"
+        f"📊 Баланс: {total_profits - total_losses} USD"
+    )
+
+
+
+
+@router.message(Expense.amount)
+async def process_expense_amount(message: Message, state: FSMContext, db: AsyncSession = Depends(get_db)):
+    try:
+        amount = float(message.text)
+        await state.update_data(amount=amount)
+        data = await state.get_data()
+
+        # Save to database
+        transaction = Transaction(
+            user_id=message.from_user.id,
+            date=datetime.strptime(data["date"], "%Y-%m-%d").date(),
+            category=data["category"],
+            currency=data["currency"],
+            amount=amount,
+            type="loss"
+        )
+        db.add(transaction)
+        await db.commit()
+
+        # Send confirmation
+        displayed_date = "Сегодня" if data["date"] == datetime.today().strftime("%Y-%m-%d") else data["date"]
+        await message.answer(
+            f"✅ Расход записан:\n"
+            f"📅 Дата: {displayed_date}\n"
+            f"📂 Категория: {data['category']}\n"
+            f"💰 Валюта: {data['currency']}\n"
+            f"💸 Сумма: {data['amount']}"
+        )
+        await message.answer(main_page(), reply_markup=kb.main)
+        await state.clear()
+
+    except ValueError:
+        await message.answer("Введите корректную сумму (например, 150.75).")
+
+
+@router.message(Profit.amount)
+async def process_profit_amount(message: Message, state: FSMContext, db: AsyncSession = Depends(get_db)):
+    try:
+        amount = float(message.text)
+        await state.update_data(amount=amount)
+        data = await state.get_data()
+
+        # Save to database
+        transaction = Transaction(
+            user_id=message.from_user.id,
+            date=datetime.strptime(data["date"], "%Y-%m-%d").date(),
+            category=data["category"],
+            currency=data["currency"],
+            amount=amount,
+            type="profit"
+        )
+        db.add(transaction)
+        await db.commit()
+
+        # Send confirmation
+        displayed_date = "Сегодня" if data["date"] == datetime.today().strftime("%Y-%m-%d") else data["date"]
+        await message.answer(
+            f"✅ Доход записан:\n"
+            f"📅 Дата: {displayed_date}\n"
+            f"📂 Категория: {data['category']}\n"
+            f"💰 Валюта: {data['currency']}\n"
+            f"💵 Сумма: {data['amount']}"
+        )
+        await message.answer(main_page(), reply_markup=kb.main)
+        await state.clear()
+
+    except ValueError:
+        await message.answer("Введите корректную сумму (например, 150.75).")
+
+
+
+@router.message
+async def display_report(message: Message, start_date: datetime.date, end_date: datetime.date, db: AsyncSession = Depends(get_db)):
+    # Query losses
+    losses = await db.execute(
+        select(Transaction).where(
+            Transaction.user_id == message.from_user.id,
+            Transaction.type == "loss",
+            Transaction.date >= start_date,
+            Transaction.date <= end_date
+        )
+    )
+    losses = losses.scalars().all()
+
+    # Query profits
+    profits = await db.execute(
+        select(Transaction).where(
+            Transaction.user_id == message.from_user.id,
+            Transaction.type == "profit",
+            Transaction.date >= start_date,
+            Transaction.date <= end_date
+        )
+    )
+    profits = profits.scalars().all()
+
+    # Calculate totals
+    total_losses = sum(item.amount for item in losses)
+    total_profits = sum(item.amount for item in profits)
+
+    # Send the report
+    await message.answer(
+        f"📅 Отчет с {start_date} по {end_date}:\n"
+        f"💸 Траты: {total_losses} USD\n"
+        f"💵 Доходы: {total_profits} USD\n"
+        f"📊 Баланс: {total_profits - total_losses} USD"
+    )
